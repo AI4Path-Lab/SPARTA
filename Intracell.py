@@ -39,8 +39,8 @@ sns.set_theme(style="whitegrid")
 # USER SETTINGS
 # =========================
 ROOT_DIR = "/fs/scratch/PAS2942/Alejandro/Shanaka"
-GROUP_DIRS = ["Cancer", "new_pics"]
-OUT_DIR = "/fs/scratch/PAS2942/Alejandro/Shanaka/analysis_grouped"
+GROUP_DIRS = ["Control", "PolydAdT"]
+OUT_DIR = "/fs/scratch/PAS2942/Alejandro/Shanaka/Intra"
 
 SMOOTH_SIGMA = 1.0
 MIN_OBJ_SIZE = 200
@@ -331,7 +331,13 @@ def plot_radial_profile(dist_vals, signal_vals, out_path, title, ylabel):
                     prof[i] = np.mean(signal_vals[mm])
             ax.plot(centers, prof, linewidth=2.4, marker="o", markersize=3.5)
     ax.set_title(title, fontweight="bold")
-    ax.set_xlabel("Distance from nucleus (pixels)")
+    labels = {
+        "Radial green profile": "Distance from nucleus (pixels)",
+        "Radial green-actin colocalization profile": "Distance from actin (pixels)",
+        "Radial green-actin-nucleus colocalization profile":
+            "Distance from nearest actin or nucleus pixel (pixels)",
+    }
+    ax.set_xlabel(labels[title])
     ax.set_ylabel(ylabel)
     fig.tight_layout()
     fig.savefig(out_path, dpi=300, bbox_inches="tight")
@@ -648,13 +654,59 @@ def make_group_plots(summary_df, stats_df, out_dir):
         "fraction_green_within_5px_actin", "puncta_count", "green_filament_pixels"
     ]
     metrics = [m for m in priority if m in summary_df.columns]
+    titles = {
+        "green_actin_mean": "Mean green intensity within actin",
+        "green_cytoplasm_mean": "Mean green intensity within cytoplasm",
+        "manders_green_actin": "Green–actin overlap coefficient",
+        "mean_green_actin_coloc_score": "Green–actin colocalization score",
+        "mean_green_to_actin_distance": "Mean green-to-actin distance",
+        "fraction_green_within_5px_actin": "Green signal within 5 pixels of actin",
+        "puncta_count": "Number of green puncta",
+        "green_filament_pixels": "Green filament area",
+    }
+
     for metric in metrics:
-        fig, ax = plt.subplots(figsize=(7, 5))
-        sns.boxplot(data=summary_df, x="group", y=metric, palette=[COLORS.get(g, "#888888") for g in GROUP_DIRS], ax=ax)
-        sns.stripplot(data=summary_df, x="group", y=metric, color="black", alpha=0.55, size=4, ax=ax)
-        ax.set_title(metric, fontweight="bold")
+        fig, ax = plt.subplots(figsize=(7, 4))
+
+        sns.stripplot(
+            data=summary_df, x=metric, y="group",
+            order=GROUP_DIRS, hue="group", hue_order=GROUP_DIRS,
+            palette=["#F4A582", "#70C1E4"],
+            jitter=0.25, size=8, alpha=0.7,
+            legend=False, ax=ax
+        )
+
+        sns.pointplot(
+            data=summary_df, x=metric, y="group",
+            order=GROUP_DIRS, orient="h",
+            errorbar=("ci", 95), n_boot=10000, seed=42,
+            linestyle="none", color="black",
+            markers="o", markersize=5, capsize=0.1,
+            err_kws={"linewidth": 1.5}, zorder=10, ax=ax
+        )
+
+        ax.axvline(0, color="gray", linestyle="--", linewidth=1)
+        ax.set_title(titles.get(metric, metric))
+        ax.set_xlabel("Mean and 95% confidence interval")
+        ax.set_ylabel("")
+        ax.grid(color="#E5E5E5", linewidth=0.7)
+        ax.set_axisbelow(True)
+
+        for i, group in enumerate(GROUP_DIRS):
+            n = summary_df.loc[
+                summary_df["group"] == group, metric
+            ].count()
+            ax.text(
+                0.97, i - 0.35, f"n = {n}",
+                transform=ax.get_yaxis_transform(),
+                ha="right", fontsize=10
+            )
+
         fig.tight_layout()
-        fig.savefig(os.path.join(out_dir, f"{metric}_by_group.png"), dpi=300, bbox_inches="tight")
+        fig.savefig(
+            os.path.join(out_dir, f"{metric}_by_group.png"),
+            dpi=300, bbox_inches="tight"
+        )
         plt.close(fig)
 
     if stats_df is not None and stats_df.shape[0] > 0:
@@ -756,9 +808,11 @@ def analyze_image(img_path, file_index, out_root):
     plot_hexbin(R.flatten()[idx], G.flatten()[idx], "Actin / purple-channel intensity", "Green intensity", "Green vs Actin", os.path.join(outdir, "green_vs_actin_hexbin.png"))
 
     dist_from_nucleus = distance_transform_edt(~blue) if np.any(blue) else np.zeros_like(blue, dtype=np.float32)
+    dist_from_actin = distance_transform_edt(~actin)
+    dist_from_actin_nucleus = distance_transform_edt(~(actin.astype(bool) | blue.astype(bool)))
     plot_radial_profile(dist_from_nucleus[cell], G[cell], os.path.join(outdir, "green_radial_profile.png"), "Radial green profile", "Mean green intensity")
-    plot_radial_profile(dist_from_nucleus[cell], ga_only_coloc_map[cell], os.path.join(outdir, "green_actin_colocalization_radial_profile.png"), "Radial green-actin colocalization profile", "Mean green-actin colocalization")
-    plot_radial_profile(dist_from_nucleus[cell], tri_coloc_map[cell], os.path.join(outdir, "green_actin_nucleus_colocalization_radial_profile.png"), "Radial green-actin-nucleus colocalization profile", "Mean triple colocalization")
+    plot_radial_profile(dist_from_actin[cell], ga_only_coloc_map[cell], os.path.join(outdir, "green_actin_colocalization_radial_profile.png"), "Radial green-actin colocalization profile", "Mean green-actin colocalization")
+    plot_radial_profile(dist_from_actin_nucleus[cell], tri_coloc_map[cell], os.path.join(outdir, "green_actin_nucleus_colocalization_radial_profile.png"), "Radial green-actin-nucleus colocalization profile", "Mean triple colocalization")
 
     row = {
         "file_index": file_index,
